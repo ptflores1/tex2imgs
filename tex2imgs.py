@@ -1,5 +1,5 @@
 import os
-
+import argparse
 import re
 from typing import List
 import jinja2
@@ -96,8 +96,8 @@ def _is_commented_out(content: str) -> bool:
     return True
 
 
-def extract_latex_equations(latex_string: str) -> List[str]:
-    """
+def extract_latex_equations(latex_string: str, equation_types: List[str] = None) -> List[str]:
+    r"""
     Extracts all LaTeX equations from a given string, including their surrounding delimiters
     or environment markers (e.g., \begin{align*}...\end{align*}, $$, or $).
 
@@ -105,40 +105,54 @@ def extract_latex_equations(latex_string: str) -> List[str]:
 
     Args:
         latex_string: A string containing the LaTeX document content.
+        equation_types: List of equation types to extract. Options: 'block', 'display', 'inline', 'all'.
+                       Default is None which extracts all types.
 
     Returns:
         A list of unique equation strings, including their original delimiters.
     """
+    if equation_types is None:
+        equation_types = ['all']
+    
+    # Normalize equation types
+    extract_all = 'all' in equation_types
+    extract_block = extract_all or 'block' in equation_types
+    extract_display = extract_all or 'display' in equation_types
+    extract_inline = extract_all or 'inline' in equation_types
+    
     equations = []
 
-    # --- 1. Match LaTeX Environments ---
-    # Group 1: full_match, Group 2: env_name, Group 3: inner_content
-    env_pattern = re.compile(
-        r'(\\begin\{(equation|align|gather|multline|flalign|alignat|split|cases)\*?\}(.*?)\\end\{\2\*?\})',
-        re.DOTALL
-    )
+    # --- 1. Match LaTeX Environments (block equations) ---
+    if extract_block:
+        # Group 1: full_match, Group 2: env_name, Group 3: inner_content
+        env_pattern = re.compile(
+            r'(\\begin\{(equation|align|gather|multline|flalign|alignat|split|cases)\*?\}(.*?)\\end\{\2\*?\})',
+            re.DOTALL
+        )
 
-    env_matches = env_pattern.findall(latex_string)
-    for full_match, _, inner_content in env_matches:
-        if not _is_purely_numeric_content(inner_content) and not _is_commented_out(inner_content):
-            equations.append(full_match.strip())
+        env_matches = env_pattern.findall(latex_string)
+        for full_match, _, inner_content in env_matches:
+            if not _is_purely_numeric_content(inner_content) and not _is_commented_out(inner_content):
+                equations.append(full_match.strip())
 
     # --- 2. Match Double Dollar Signs ($$ Display Math $$) ---
-    # Group 1: full_match, Group 2: inner_content
-    dd_pattern = re.compile(r'(\$\$([\s\S]*?)\$\$)', re.DOTALL)
-    dd_matches = dd_pattern.findall(latex_string)
-    for full_match, inner_content in dd_matches:
-        if not _is_purely_numeric_content(inner_content) and not _is_commented_out(inner_content):
-            equations.append(full_match.strip())
+    if extract_display:
+        # Group 1: full_match, Group 2: inner_content
+        dd_pattern = re.compile(r'(\$\$([\s\S]*?)\$\$)', re.DOTALL)
+        dd_matches = dd_pattern.findall(latex_string)
+        for full_match, inner_content in dd_matches:
+            if not _is_purely_numeric_content(inner_content) and not _is_commented_out(inner_content):
+                equations.append(full_match.strip())
 
     # --- 3. Match Inline Dollar Signs ($ Inline Math $) ---
-    # Group 1: full_match, Group 2: inner_content
-    # The inner content matching group is necessary for filtering
-    id_pattern = re.compile(r'((?<!\$)\$([^\$]+?)\$(?!\$))', re.DOTALL)
-    id_matches = id_pattern.findall(latex_string)
-    for full_match, inner_content in id_matches:
-        if not _is_purely_numeric_content(inner_content) and not _is_commented_out(inner_content):
-            equations.append(full_match.strip())
+    if extract_inline:
+        # Group 1: full_match, Group 2: inner_content
+        # The inner content matching group is necessary for filtering
+        id_pattern = re.compile(r'((?<!\$)\$([^\$]+?)\$(?!\$))', re.DOTALL)
+        id_matches = id_pattern.findall(latex_string)
+        for full_match, inner_content in id_matches:
+            if not _is_purely_numeric_content(inner_content) and not _is_commented_out(inner_content):
+                equations.append(full_match.strip())
 
     return list(set(equations))
 
@@ -189,17 +203,21 @@ def get_equation_label(equation: str) -> str | None:
         return match.group(1).replace(":", "_")
     return None
 
-def process_tex_file(path: str, output_dir: str, preamble: str) -> str:
+def process_tex_file(path: str, output_dir: str, preamble: str, density: int = 300, equation_types: List[str] = None) -> str:
     """
     Processes a LaTeX file to extract equations and convert them to images.
 
     Args:
         path: The path to the LaTeX file.
+        output_dir: The directory to save the output images.
+        preamble: The accumulated preamble from previous files.
+        density: The DPI density for image conversion (default: 300).
+        equation_types: List of equation types to extract.
     """
     with open(path, 'r') as f:
         latex_document = f.read()
 
-    extracted_equations = extract_latex_equations(latex_document)
+    extracted_equations = extract_latex_equations(latex_document, equation_types)
     preamble_statements = extract_preamble(latex_document)
     preamble = '\n'.join(preamble_statements)
 
@@ -215,31 +233,79 @@ def process_tex_file(path: str, output_dir: str, preamble: str) -> str:
         make_tex_file(eq, preamble, f'./tmp/texs/equation_{i+1}.tex')
         os.system(f'pdflatex -interaction=nonstopmode -output-directory ./tmp/pdfs ./tmp/texs/equation_{i+1}.tex > /dev/null 2>&1')
         os.system(f"pdfcrop -margins 3 ./tmp/pdfs/equation_{i+1}.pdf ./tmp/crops/equation_{i+1}-crop.pdf")
-        os.system(f"magick -density 300 ./tmp/crops/equation_{i+1}-crop.pdf -quality 90 {output_path}")
+        os.system(f"magick -density {density} ./tmp/crops/equation_{i+1}-crop.pdf -quality 90 {output_path}")
         os.system(f'rm ./tmp/pdfs/equation_{i+1}.log ./tmp/pdfs/equation_{i+1}.aux')
     return preamble
 
 
 
-def process_directory(input_dir: str) -> None:
+def process_directory(input_dir: str, output_dir: str = 'images', density: int = 300, equation_types: List[str] = None) -> None:
     """
     Processes all LaTeX files in a directory to extract equations and convert them to images.
 
     Args:
         input_dir: The directory containing LaTeX files.
-        output_dir: The directory to save the output images.
+        output_dir: The directory to save the output images (default: 'images').
+        density: The DPI density for image conversion (default: 300).
+        equation_types: List of equation types to extract.
     """
-    os.makedirs('images', exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     agg_preamble = ''
     for dirpath, _, filenames in os.walk(input_dir):
         for filename in filenames:
             if filename.endswith('.tex'):
-                output_dir = os.path.join("images/", dirpath.lstrip('./'), filename[:-4])
-                os.makedirs(output_dir, exist_ok=True)
-                preamble = process_tex_file(os.path.join(dirpath, filename), output_dir, agg_preamble)
+                file_output_dir = os.path.join(output_dir, dirpath.lstrip('./'), filename[:-4])
+                os.makedirs(file_output_dir, exist_ok=True)
+                preamble = process_tex_file(os.path.join(dirpath, filename), file_output_dir, agg_preamble, density, equation_types)
                 agg_preamble += '\n' + preamble
 
 
 if __name__ == '__main__':
-    process_directory('./Thesis')
+    parser = argparse.ArgumentParser(
+        description='Extract equations as images from LaTeX projects',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Equation types:
+  all      - Extract all equation types (default)
+  block    - Extract block equations (\\begin{equation}, \\begin{align}, etc.)
+  display  - Extract display math equations ($$...$$)
+  inline   - Extract inline math equations ($...$)
+
+Examples:
+  %(prog)s ./my_latex_project
+  %(prog)s ./my_latex_project -o ./output -d 600
+  %(prog)s ./my_latex_project -t block display
+  %(prog)s ./my_latex_project -o ./equations -t inline -d 450
+        '''
+    )
+    
+    parser.add_argument(
+        'input_dir',
+        help='Directory containing LaTeX files to process'
+    )
+    
+    parser.add_argument(
+        '-o', '--output-dir',
+        default='images',
+        help='Output directory for equation images (default: images)'
+    )
+    
+    parser.add_argument(
+        '-t', '--equation-types',
+        nargs='+',
+        choices=['all', 'block', 'display', 'inline'],
+        default=['all'],
+        help='Types of equations to extract (default: all)'
+    )
+    
+    parser.add_argument(
+        '-d', '--density',
+        type=int,
+        default=300,
+        help='DPI density for image conversion (default: 300)'
+    )
+    
+    args = parser.parse_args()
+    
+    process_directory(args.input_dir, args.output_dir, args.density, args.equation_types)
 
