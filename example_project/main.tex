@@ -1,0 +1,35 @@
+\documentclass{article}
+\usepackage{amsmath}
+\begin{document}
+
+This is some introductory text with an inline equation: $E=mc^2$.
+
+A simple display math block:
+$$
+\int_{0}^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+$$
+
+A numbered equation environment:
+\begin{equation}
+    F = ma + kx
+\end{equation}
+This is the force equation.
+
+A multi-line alignment block:
+\begin{align*}
+    a^2 + b^2 &= c^2 \\
+    \sin^2\theta + \cos^2\theta &= 1
+\end{align*}
+
+More text with another inline equation: $\vec{A} \cdot \vec{B} = |\vec{A}||\vec{B}|\cos\theta$.
+
+A nested environment (the `split` inside `equation`):
+\begin{equation}
+    \begin{split}
+        \frac{\partial L}{\partial q} - \frac{d}{dt} \left( \frac{\partial L}{\partial \dot{q}} \right) &= 0 \\
+        \text{where } L &= T - V
+    \end{split}
+\end{equation}
+
+\end{document}
+
